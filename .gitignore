@@ -1,0 +1,36 @@
+# Local user state, browser profiles, logs, credentials, and recordings.
+data/
+*.WebView2/
+*.log
+*.wav
+*.mp3
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.key
+.dsh/
+.credentials*
+# Restored dependencies and generated build output.
+artifacts/
+source/packages/
+source/tests/*.exe
+**/node_modules/
+**/*.tsbuildinfo
+**/.vite/
+**/.vite-temp/
+**/.npm-cache/
+*.exe
+*.dll
+*.nupkg
+*.zip
+# Historical copies and local tools.
+backups/
+release/
+_test/
+work/
+.vs/
+.idea/
+.DS_Store
+Thumbs.db
