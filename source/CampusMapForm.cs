@@ -43,7 +43,7 @@ namespace LittleDeepSeek
                 HttpWebRequest request = (HttpWebRequest)WebRequest.Create(Url);
                 request.Proxy = null;
                 request.UserAgent = "LittleDeepSeek/0.2";
-                request.Timeout = request.ReadWriteTimeout = 1800;
+                request.Timeout = request.ReadWriteTimeout = 8000;
                 using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
                 using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
                     return response.StatusCode == HttpStatusCode.OK && reader.ReadToEnd().Contains("南京农业大学地图导航");
