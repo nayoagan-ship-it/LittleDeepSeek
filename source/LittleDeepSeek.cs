@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -7,7 +7,6 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Speech.Synthesis;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -46,11 +45,12 @@ namespace LittleDeepSeek
     internal sealed class PetSettings
     {
         internal int X = int.MinValue, Y = int.MinValue, Scale = 100;
-        internal bool Top = true, Walk = false, LivelyRoam = true, FollowMouse = false, Sleep = false, EatDeleted = true, IdleChat = true, IdleMotions = true, DshAnimations = true, TodoReminders = true, HardwareAlerts = true, StatusBoardVisible = true;
+        internal bool Top = true, Walk = false, LivelyRoam = true, FollowMouse = false, Sleep = false, EatDeleted = true, IdleChat = true, IdleMotions = true, DshAnimations = true, TodoReminders = true, HardwareAlerts = true;
         internal int TodoReminderMinutes = 10;
         // Empty means wttr.in uses the current network location.  A chosen city
         // stays local in settings.ini and is never sent anywhere except wttr.in.
         internal string WeatherCity = "";
+        internal string Skin = PetSkin.DefaultId;
         internal readonly string PathName;
 
         internal PetSettings()
@@ -65,6 +65,7 @@ namespace LittleDeepSeek
                 {
                     string[] pair = line.Split(new char[] { '=' }, 2);
                     if (pair.Length != 2) continue;
+                    if (pair[0] == "skin") { Skin = PetSkin.NormalizeId(pair[1].Trim()); continue; }
                     if (pair[0] == "weatherCity") { WeatherCity = pair[1].Trim(); continue; }
                     int value;
                     if (!int.TryParse(pair[1], out value)) continue;
@@ -85,7 +86,6 @@ namespace LittleDeepSeek
                         case "todoReminders": TodoReminders = value != 0; break;
                         case "todoReminderMinutes": TodoReminderMinutes = value == 5 || value == 20 ? value : 10; break;
                         case "hardwareAlerts": HardwareAlerts = value != 0; break;
-                        case "statusBoardVisible": StatusBoardVisible = value != 0; break;
                     }
                 }
             }
@@ -109,7 +109,7 @@ namespace LittleDeepSeek
                     + "\ntodoReminders=" + (TodoReminders ? 1 : 0)
                     + "\ntodoReminderMinutes=" + TodoReminderMinutes
                     + "\nhardwareAlerts=" + (HardwareAlerts ? 1 : 0)
-                    + "\nstatusBoardVisible=" + (StatusBoardVisible ? 1 : 0)
+                    + "\nskin=" + PetSkin.NormalizeId(Skin)
                     + "\nweatherCity=" + (WeatherCity ?? "").Replace("\r", "").Replace("\n", "") + "\n";
                 File.WriteAllText(PathName + ".tmp", text);
                 if (File.Exists(PathName)) File.Replace(PathName + ".tmp", PathName, null);
@@ -243,10 +243,10 @@ namespace LittleDeepSeek
     internal sealed partial class PetForm : Form
     {
         private readonly PetSettings settings = new PetSettings();
-        private readonly Bitmap art, sideArt, backArt;
-        private readonly Bitmap sleepArt, flowerArt, riceArt;
+        private Bitmap art, sideArt, backArt;
+        private Bitmap sleepArt, flowerArt, riceArt;
         private readonly Icon petIcon;
-        private readonly Rectangle crop, sideCrop, backCrop, sleepCrop, flowerCrop, riceCrop;
+        private Rectangle crop, sideCrop, backCrop, sleepCrop, flowerCrop, riceCrop;
         private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
         private readonly System.Windows.Forms.Timer clickTimer = new System.Windows.Forms.Timer();
         private readonly Stopwatch watch = Stopwatch.StartNew();
@@ -255,13 +255,10 @@ namespace LittleDeepSeek
         private readonly ContextMenuStrip menu = new ContextMenuStrip();
         private readonly PetMenuRenderer menuRenderer = new PetMenuRenderer();
         private readonly NotifyIcon tray;
-        private SpeechSynthesizer interactionVoice;
-        private ToolStripMenuItem walkItem, followItem, stillItem, sleepItem, topItem, visibilityItem, idleChatItem, idleMotionItem, dshAnimationsItem, livelyRoamItem, hardwareAlertsItem, weatherCityItem, statusBoardItem;
+        private ToolStripMenuItem walkItem, followItem, stillItem, sleepItem, topItem, visibilityItem, idleChatItem, idleMotionItem, dshAnimationsItem, livelyRoamItem, hardwareAlertsItem, weatherCityItem;
         private TodoForm todoWindow;
-        private StatusBoardForm statusBoard;
-        private string speech = "你好呀，我是小deepseek！\n点点我，陪你一起摸鱼～";
+        private string speech = "";
         private double speechUntil = 8, jumpUntil, happyUntil, lastTick, nextWalk, walkUntil, nextIdleMotion, idleSwayUntil, idleStretchUntil, turnUntil;
-        private double spinStartedAt, spinUntil, spinLastAngle, spinInitialRadius, spinAccumulatedAngle;
         private double nextGreeting;
         private double nextHardwareCheck, nextHardwareWarning;
         private bool idleSpeech;
@@ -323,7 +320,7 @@ namespace LittleDeepSeek
         {
             "去别的地方玩！\n不要耽误 AGI 训练！",
             "真赶不走啊你！\n……那就再陪一会儿。",
-            "压力一只蓝色大肥鱼？\n小 deepseek 也有压力呀～",
+            "压力一只蓝色大肥鱼？\n{pet} 也有压力呀～",
             "大肥鱼坐得住，\n我也陪你坐得住。",
             "你这吃白饭的用户！\n快来摸摸我～",
             "这些家伙真粘人，\n赶都赶不走……好吧我也是。"
@@ -343,14 +340,13 @@ namespace LittleDeepSeek
             "嗝～又圆了一小圈……",
             "白饭配陪伴，\n今天也很快乐～"
         };
-        private bool mouseHeld, dragging, closing, ready, headSpinTracking, headSpinMoved, spinning;
+        private bool mouseHeld, dragging, closing, ready;
         private string poseName;
         private double poseUntil;
-        private const double RicePoseDuration = 5;
+        private const double RicePoseDuration = 5.0 / DshAnimationPlaybackRate;
+        private const double JumpAnimationDuration = 0.75 / DshAnimationPlaybackRate;
         private bool RicePoseActive { get { return poseName == "rice" && !settings.Sleep && watch.Elapsed.TotalSeconds < poseUntil; } }
         private Point downMouse, downLocation;
-        private Point spinCenter;
-        private int spinDirection, spinTurns;
         private int walkDirection = -1, walkVerticalDirection;
         private const int ViewFront = 0, ViewSide = 1, ViewBack = 2;
         private int viewDirection = ViewFront, previousViewDirection = ViewFront, sideFacing = 1, previousSideFacing = 1;
@@ -363,22 +359,14 @@ namespace LittleDeepSeek
         internal PetForm(bool verifyUi)
         {
             this.verifyUi = verifyUi;
-            using (Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("LittleDeepSeek.pet.png"))
-            using (Bitmap original = new Bitmap(stream)) art = new Bitmap(original);
-            sideArt = LoadArt("side"); backArt = LoadArt("back");
-            sleepArt = LoadArt("sleep"); flowerArt = LoadArt("flower"); riceArt = LoadArt("rice");
             InitializeDshAnimations();
             using (Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("LittleDeepSeek.pet.ico"))
             using (Icon original = new Icon(stream)) petIcon = (Icon)original.Clone();
-            crop = FindOpaqueBounds(art);
-            sideCrop = sideArt != null ? FindOpaqueBounds(sideArt) : Rectangle.Empty;
-            backCrop = backArt != null ? FindOpaqueBounds(backArt) : Rectangle.Empty;
-            sleepCrop = sleepArt != null ? FindOpaqueBounds(sleepArt) : Rectangle.Empty;
-            flowerCrop = flowerArt != null ? FindOpaqueBounds(flowerArt) : Rectangle.Empty;
-            riceCrop = riceArt != null ? FindOpaqueBounds(riceArt) : Rectangle.Empty;
+            InitializeSkins();
+            speech = "你好呀，我是" + PetName + "！\n点点我，陪你一起摸鱼～";
             using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) dpiScale = g.DpiX / 96f;
-            Text = "小deepseek";
-            AccessibleName = "小deepseek桌面宠物";
+            Text = PetName;
+            AccessibleName = PetName + "桌面宠物";
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = verifyUi;
             StartPosition = FormStartPosition.Manual;
@@ -391,7 +379,8 @@ namespace LittleDeepSeek
             if (settings.X == int.MinValue || settings.Y == int.MinValue) MoveToCorner(false);
             else Location = ClampToScreen(new Point(settings.X, settings.Y));
             BuildMenu();
-            tray = new NotifyIcon { Icon = petIcon, Text = "小deepseek · 右键互动 / todo-list", ContextMenuStrip = menu, Visible = true };
+            tray = new NotifyIcon { Icon = petIcon, Text = PetName + " · 右键互动 / todo-list", ContextMenuStrip = menu, Visible = true };
+            identity.Changed += SkinNameChanged;
             tray.DoubleClick += delegate { BringPetBack(); };
             clickTimer.Interval = SystemInformation.DoubleClickTime;
             clickTimer.Tick += delegate { FinishPetClicks(); };
@@ -418,12 +407,12 @@ namespace LittleDeepSeek
             lastTick = watch.Elapsed.TotalSeconds;
             ScheduleIdleChat();
             ScheduleIdleMotion(watch.Elapsed.TotalSeconds);
+            ScheduleDshAnimations(watch.Elapsed.TotalSeconds);
             nextHardwareCheck = watch.Elapsed.TotalSeconds + 10;
             RenderFrame();
             timer.Start();
             StartDesktopMonitoring();
             StartTodoReminders();
-            if (settings.StatusBoardVisible) ShowStatusBoard();
         }
 
         private static Rectangle FindOpaqueBounds(Bitmap bitmap)
@@ -452,21 +441,23 @@ namespace LittleDeepSeek
 
         private void BuildMenu()
         {
-            ToolStripMenuItem title = new ToolStripMenuItem("小deepseek  ·  你的桌面小伙伴") { Enabled = false, Tag = "menu-header" };
-            menu.Items.Add(title);
+            petTitleItem = new ToolStripMenuItem(PetName + "  ·  你的桌面小伙伴") { Enabled = false, Tag = "menu-header" };
+            menu.Items.Add(petTitleItem);
             menu.Items.Add(new ToolStripSeparator());
             ToolStripMenuItem interactions = BuildInteractionMenu(); interactions.Tag = "menu-group"; menu.Items.Add(interactions);
             ToolStripMenuItem personalization = BuildPersonalizationMenu(); personalization.Tag = "menu-group"; menu.Items.Add(personalization);
+            ToolStripMenuItem campusMap = new ToolStripMenuItem("校园地图", null, delegate { OpenCampusMap(); }) { Name = "campus-map", Tag = "menu-accent" };
+            menu.Items.Add(campusMap);
             ToolStripMenuItem status = BuildStatusMenu(); status.Tag = "menu-group"; menu.Items.Add(status);
             ToolStripMenuItem todos = BuildTodoMenu(); todos.Tag = "menu-group"; menu.Items.Add(todos);
             ToolStripMenuItem harness = new ToolStripMenuItem("deepseek求索", null, delegate { OpenHarnessChat(); });
             harness.Tag = "menu-accent"; menu.Items.Add(harness);
             menu.Items.Add(new ToolStripSeparator());
-            ToolStripMenuItem exit = new ToolStripMenuItem("退出小deepseek", null, delegate { Close(); });
-            exit.Tag = "menu-exit"; menu.Items.Add(exit);
+            petExitItem = new ToolStripMenuItem("退出" + PetName, null, delegate { Close(); });
+            petExitItem.Tag = "menu-exit"; menu.Items.Add(petExitItem);
             ApplyMenuStyle(menu);
             menu.Opening += delegate { RefreshMenuState(); };
-            menu.Closed += delegate { ScheduleIdleChat(); };
+            menu.Closed += delegate { ScheduleIdleChat(); ScheduleDshAnimations(watch.Elapsed.TotalSeconds); };
         }
 
         private void ApplyMenuStyle(ToolStripDropDown strip)
@@ -555,16 +546,13 @@ namespace LittleDeepSeek
 
         private void OpenHarnessChat()
         {
-            using (HarnessChatForm chat = new HarnessChatForm(petIcon)) chat.ShowDialog(this);
+            using (HarnessChatForm chat = new HarnessChatForm(petIcon, identity)) chat.ShowDialog(this);
         }
 
         private ToolStripMenuItem BuildInteractionMenu()
         {
-            ToolStripMenuItem interactions = new ToolStripMenuItem("可爱互动");
-            interactions.DropDownItems.Add("摸摸脑袋 ♡", null, delegate { Pet(); });
-            interactions.DropDownItems.Add("吃白饭", null, delegate { EatRice(); });
-            interactions.DropDownItems.Add("跳一下！", null, delegate { Jump(); });
-            interactions.DropDownItems.Add("转圈圈（拖住脑袋画圈）", null, delegate { StartSpin(random.Next(2) == 0 ? -1 : 1); });
+            ToolStripMenuItem interactions = new ToolStripMenuItem("可爱互动") { Name = "cute-interactions" };
+            AddCuteInteractionMenuItems(interactions);
             interactions.DropDownItems.Add(new ToolStripSeparator());
             walkItem = new ToolStripMenuItem("自己散散步", null, delegate { ToggleWalk(); });
             followItem = new ToolStripMenuItem("跟随鼠标", null, delegate { ToggleFollowMouse(); });
@@ -575,18 +563,20 @@ namespace LittleDeepSeek
             interactions.DropDownItems.Add(stillItem);
             interactions.DropDownItems.Add(sleepItem);
             interactions.DropDownItems.Add(new ToolStripSeparator());
-            interactions.DropDownItems.Add("怎么玩", null, delegate { Say("单击摸摸 · 双击跳跃 · 三连击语音待办\n拖动搬家 · 滚轮调大小\n拖住脑袋画圈会转圈圈\n右键可选择散步、跟随或原地陪伴", 10); });
+            interactions.DropDownItems.Add("怎么玩", null, delegate { Say("单击摸摸 · 双击跳跃 · 三连击语音待办\n拖动搬家 · 滚轮调大小\n右键可选择散步、跟随或原地陪伴", 10); });
             interactions.DropDownOpening += delegate { RefreshMenuState(); };
             return interactions;
         }
 
         private ToolStripMenuItem BuildPersonalizationMenu()
         {
-            ToolStripMenuItem personalization = new ToolStripMenuItem("个性化");
+            ToolStripMenuItem personalization = new ToolStripMenuItem("个性化") { Name = "personalization" };
+            personalization.DropDownItems.Add(BuildSkinMenu());
+            personalization.DropDownItems.Add(new ToolStripSeparator());
             idleChatItem = new ToolStripMenuItem("空闲时主动找你玩", null, delegate
             {
                 settings.IdleChat = !settings.IdleChat;
-                if (!settings.IdleChat && idleSpeech) { speechUntil = 0; idleSpeech = false; Text = "小deepseek"; }
+                if (!settings.IdleChat && idleSpeech) { speechUntil = 0; idleSpeech = false; Text = PetName; }
                 ScheduleIdleChat(); RefreshMenuState(); Save(); RenderFrame();
             });
             personalization.DropDownItems.Add(idleChatItem);
@@ -598,17 +588,10 @@ namespace LittleDeepSeek
                 RefreshMenuState(); Save(); RenderFrame();
             });
             personalization.DropDownItems.Add(idleMotionItem);
-            dshAnimationsItem = new ToolStripMenuItem("DSH 精选待机与随机动画", null, delegate
-            {
-                settings.DshAnimations = !settings.DshAnimations;
-                ScheduleDshAnimations(watch.Elapsed.TotalSeconds);
-                RefreshMenuState(); Save(); RenderFrame();
-            });
-            personalization.DropDownItems.Add(dshAnimationsItem);
             livelyRoamItem = new ToolStripMenuItem("活力漫步", null, delegate
             {
                 settings.LivelyRoam = !settings.LivelyRoam;
-                if (settings.LivelyRoam) { settings.Walk = false; settings.FollowMouse = false; nextWalk = watch.Elapsed.TotalSeconds + 0.5; }
+                if (settings.LivelyRoam) { PauseAutoplayForMovement(); settings.Walk = false; settings.FollowMouse = false; nextWalk = watch.Elapsed.TotalSeconds + 0.5; }
                 else { walkUntil = 0; walkRemainder = 0; walkVerticalRemainder = 0; }
                 RefreshMenuState(); Save();
             });
@@ -650,9 +633,6 @@ namespace LittleDeepSeek
         private ToolStripMenuItem BuildStatusMenu()
         {
             ToolStripMenuItem status = new ToolStripMenuItem("天气与电脑状态");
-            statusBoardItem = new ToolStripMenuItem("打开电脑小白板", null, delegate { ToggleStatusBoard(); });
-            status.DropDownItems.Add(statusBoardItem);
-            status.DropDownItems.Add(new ToolStripSeparator());
             status.DropDownItems.Add("播报当前天气", null, delegate { RequestWeather(); });
             weatherCityItem = new ToolStripMenuItem("设置天气城市（自动定位）", null, delegate { ConfigureWeatherCity(); });
             status.DropDownItems.Add(weatherCityItem);
@@ -668,30 +648,6 @@ namespace LittleDeepSeek
             return status;
         }
 
-        private void ToggleStatusBoard()
-        {
-            if (settings.StatusBoardVisible) HideStatusBoard();
-            else ShowStatusBoard();
-            RefreshMenuState(); Save();
-        }
-
-        private void ShowStatusBoard()
-        {
-            settings.StatusBoardVisible = true;
-            if (statusBoard == null || statusBoard.IsDisposed)
-            {
-                statusBoard = new StatusBoardForm(this);
-                statusBoard.HideRequested += delegate { HideStatusBoard(); RefreshMenuState(); Save(); };
-            }
-            statusBoard.ShowBoard();
-        }
-
-        private void HideStatusBoard()
-        {
-            settings.StatusBoardVisible = false;
-            if (statusBoard != null && !statusBoard.IsDisposed) statusBoard.Hide();
-        }
-
         private void ConfigureWeatherCity()
         {
             using (Form dialog = new Form())
@@ -700,7 +656,7 @@ namespace LittleDeepSeek
             using (Button ok = new Button())
             using (Button cancel = new Button())
             {
-                dialog.Text = "天气城市 · 小deepseek";
+                dialog.Text = "天气城市 · " + PetName;
                 dialog.Icon = petIcon;
                 dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
                 dialog.StartPosition = FormStartPosition.CenterParent;
@@ -777,7 +733,7 @@ namespace LittleDeepSeek
 
         private bool CanAutoBroadcastHardware(double now)
         {
-            return Visible && !settings.Sleep && !menu.Visible && !mouseHeld && !dragging && !spinning && !clickTimer.Enabled
+            return Visible && !settings.Sleep && !menu.Visible && !mouseHeld && !dragging && !clickTimer.Enabled
                 && !DesktopEatingActive && !RicePoseActive && poseName == null && now >= jumpUntil && now >= happyUntil
                 && now >= speechUntil;
         }
@@ -793,24 +749,20 @@ namespace LittleDeepSeek
 
         private void RefreshMenuState()
         {
+            RefreshSkinMenuState();
             walkItem.Checked = settings.Walk;
             followItem.Checked = settings.FollowMouse;
             stillItem.Checked = !settings.Walk && !settings.LivelyRoam && !settings.FollowMouse;
             sleepItem.Checked = settings.Sleep;
-            sleepItem.Text = settings.Sleep ? "叫醒小deepseek" : "休息一会儿";
+            sleepItem.Text = settings.Sleep ? "叫醒" + PetName : "休息一会儿";
             topItem.Checked = settings.Top;
-            visibilityItem.Text = Visible ? "暂时藏起来" : "叫回小deepseek";
+            visibilityItem.Text = Visible ? "暂时藏起来" : "叫回" + PetName;
             deleteAnimationItem.Checked = settings.EatDeleted;
             idleChatItem.Checked = settings.IdleChat;
             idleMotionItem.Checked = settings.IdleMotions;
             if (dshAnimationsItem != null) dshAnimationsItem.Checked = settings.DshAnimations;
             livelyRoamItem.Checked = settings.LivelyRoam;
             if (hardwareAlertsItem != null) hardwareAlertsItem.Checked = settings.HardwareAlerts;
-            if (statusBoardItem != null)
-            {
-                statusBoardItem.Checked = settings.StatusBoardVisible;
-                statusBoardItem.Text = settings.StatusBoardVisible ? "收起电脑小白板" : "打开电脑小白板";
-            }
             if (weatherCityItem != null)
                 weatherCityItem.Text = String.IsNullOrEmpty(settings.WeatherCity) ? "设置天气城市（自动定位）"
                     : "设置天气城市（" + settings.WeatherCity + "）";
@@ -847,7 +799,7 @@ namespace LittleDeepSeek
             SetSize();
             UpdateMenuScale();
             Location = ClampToScreen(new Point(anchor.X - Width / 2, anchor.Y - Height));
-            Say("现在是 " + settings.Scale + "% 的小deepseek！", 3);
+            Say("现在是 " + settings.Scale + "% 的" + PetName + "！", 3);
             Save(); RenderFrame();
         }
 
@@ -855,9 +807,10 @@ namespace LittleDeepSeek
         {
             idleSpeech = false;
             todoSpeech = false;
+            message = message.Replace("{pet}", PetName);
             speech = message;
             speechUntil = watch.Elapsed.TotalSeconds + seconds;
-            Text = "小deepseek · " + message.Split('\n')[0];
+            Text = PetName + " · " + message.Split('\n')[0];
             ScheduleIdleChat();
         }
 
@@ -879,7 +832,7 @@ namespace LittleDeepSeek
 
         private void TickIdleChat(double now)
         {
-            if (!settings.IdleChat || !Visible || settings.Sleep || menu.Visible || mouseHeld || dragging || spinning || clickTimer.Enabled
+            if (settings.DshAnimations || !settings.IdleChat || !Visible || settings.Sleep || menu.Visible || mouseHeld || dragging || clickTimer.Enabled
                 || DesktopEatingActive || RicePoseActive || IsDshAnimationActive(now) || poseName != null || now < jumpUntil || now < happyUntil
                 || now < speechUntil || now < nextGreeting) return;
 
@@ -889,7 +842,6 @@ namespace LittleDeepSeek
                 ? PickLine(IdleLines, ref lastIdleLine)
                 : PickLine(MemeLines, ref lastMemeLine);
             Say(line, 3 + random.NextDouble());
-            StartDshAnimation(PickDshChatAnimation(), 9.7);
             idleSpeech = true;
             walkUntil = 0; walkRemainder = 0; walkVerticalRemainder = 0;
             nextWalk = Math.Max(nextWalk, speechUntil + 2);
@@ -902,8 +854,8 @@ namespace LittleDeepSeek
 
         private bool CanShowIdleMotion(double now)
         {
-            return settings.IdleMotions && Visible && !settings.Sleep && !menu.Visible
-                && !mouseHeld && !dragging && !spinning && !clickTimer.Enabled && !DesktopEatingActive && !RicePoseActive
+            return !settings.DshAnimations && settings.IdleMotions && Visible && !settings.Sleep && !menu.Visible
+                && !mouseHeld && !dragging && !clickTimer.Enabled && !DesktopEatingActive && !RicePoseActive
                 && !IsDshAnimationActive(now) && poseName == null && now >= jumpUntil && now >= happyUntil && now >= idleSwayUntil && now >= idleStretchUntil
                 && now >= speechUntil && !followingStep;
         }
@@ -917,7 +869,7 @@ namespace LittleDeepSeek
             if (!CanShowIdleMotion(now)) return;
             switch (random.Next(3))
             {
-                case 0: jumpUntil = now + 0.62; break;
+                case 0: jumpUntil = now + 0.62 / DshAnimationPlaybackRate; break;
                 case 1: idleSwayUntil = now + 1.45; break;
                 default: idleStretchUntil = now + 1.35; break;
             }
@@ -980,24 +932,25 @@ namespace LittleDeepSeek
 
         private void Pet()
         {
-            CancelDesktopEating();
+            PrepareCuteInteraction();
             bool asleep = settings.Sleep; Wake();
             string[] replies = { "收到摸摸！送你花花 ♡", "嘿嘿，这束花送给你～", "今天也有好好陪着你哦。", "最喜欢你啦，花花给你！", "辛苦啦，送你一束小花～" };
             string reply = random.Next(100) < 70 ? replies[random.Next(replies.Length)] : PickLine(ReactionLines, ref lastReactionLine);
             Say(asleep ? "醒啦！谢谢摸摸，送你花花 ♡" : reply, 4);
             StartDshAnimation("flowers", 9.7);
-            happyUntil = watch.Elapsed.TotalSeconds + 1.1;
+            happyUntil = watch.Elapsed.TotalSeconds + 1.1 / DshAnimationPlaybackRate;
             AddHearts(6);
-            poseName = "flower"; poseUntil = watch.Elapsed.TotalSeconds + 4;
+            poseName = "flower"; poseUntil = watch.Elapsed.TotalSeconds + 4 / DshAnimationPlaybackRate;
+            ScheduleCuteInteractionEnd("pet");
         }
 
         private void EatRice()
         {
-            CancelDesktopEating();
+            PrepareCuteInteraction();
             clickTimer.Stop(); Wake();
             double now = watch.Elapsed.TotalSeconds;
             poseName = "rice"; poseUntil = now + RicePoseDuration;
-            walkUntil = 0; walkRemainder = 0; walkVerticalRemainder = 0; jumpUntil = 0; happyUntil = now + 1.15;
+            walkUntil = 0; walkRemainder = 0; walkVerticalRemainder = 0; jumpUntil = 0; happyUntil = now + 1.15 / DshAnimationPlaybackRate;
             nextWalk = poseUntil + 3;
             nextGreeting = Math.Max(nextGreeting, poseUntil + 4);
             string[] replies =
@@ -1011,6 +964,7 @@ namespace LittleDeepSeek
             string reply = random.Next(100) < 70 ? replies[random.Next(replies.Length)] : PickLine(RiceMemeLines, ref lastRiceLine);
             Say(reply, RicePoseDuration);
             AddHearts(8);
+            ScheduleCuteInteractionEnd("rice");
             RenderFrame();
         }
 
@@ -1022,16 +976,18 @@ namespace LittleDeepSeek
 
         private void Jump()
         {
-            CancelDesktopEating();
-            CancelRicePose();
-            Wake(); jumpUntil = watch.Elapsed.TotalSeconds + 0.75;
-            Say("嘿咻！铁盆可不能掉～", 3); AddHearts(4);
+            PrepareCuteInteraction();
+            Wake(); jumpUntil = watch.Elapsed.TotalSeconds + JumpAnimationDuration;
+            Say("嘿咻！一起跳一下～", 3); AddHearts(4);
+            ScheduleCuteInteractionEnd("jump");
         }
 
         private void ToggleWalk()
         {
             CancelRicePose();
-            settings.Walk = !settings.Walk; nextWalk = watch.Elapsed.TotalSeconds + 1;
+            bool startWalking = !settings.Walk;
+            PauseAutoplayForMovement();
+            settings.Walk = startWalking; nextWalk = watch.Elapsed.TotalSeconds + 1;
             if (settings.Walk) { settings.FollowMouse = false; settings.LivelyRoam = false; }
             walkUntil = 0; walkRemainder = 0; walkVerticalRemainder = 0;
             Say(settings.Walk ? "出发！在桌面散散步～" : "好，我就在这里陪你。", 4); Save();
@@ -1040,7 +996,9 @@ namespace LittleDeepSeek
         private void ToggleFollowMouse()
         {
             CancelRicePose();
-            settings.FollowMouse = !settings.FollowMouse;
+            bool startFollowing = !settings.FollowMouse;
+            PauseAutoplayForMovement();
+            settings.FollowMouse = startFollowing;
             if (settings.FollowMouse)
             {
                 settings.Walk = false;
@@ -1053,7 +1011,8 @@ namespace LittleDeepSeek
 
         private void StayStill()
         {
-            if (!settings.Walk && !settings.FollowMouse) return;
+            if (!settings.DshAnimations && !settings.Walk && !settings.FollowMouse && !settings.LivelyRoam) return;
+            PauseAutoplayForMovement();
             settings.Walk = false; settings.FollowMouse = false;
             settings.LivelyRoam = false;
             walkUntil = 0; walkRemainder = 0; walkVerticalRemainder = 0; followingStep = false;
@@ -1076,141 +1035,12 @@ namespace LittleDeepSeek
                 hearts.Add(new Particle { X = 58 + random.Next(148), Y = 156 + random.Next(64), Life = 1.2f + (float)random.NextDouble(), Velocity = (float)(random.NextDouble() - 0.5) * 24 });
         }
 
-        // The visible head occupies the upper, central part of the 264 x 348
-        // canvas.  Limit the gesture to that friendly, easy-to-discover area so
-        // normal body dragging keeps its familiar behaviour.
-        private bool IsHeadGrab(Point point)
-        {
-            float x = point.X / units - 132f, y = point.Y / units - 151f;
-            return x * x / (76f * 76f) + y * y / (68f * 68f) <= 1f;
-        }
-
-        private void BeginHeadSpinTracking()
-        {
-            headSpinTracking = true;
-            headSpinMoved = false;
-            spinAccumulatedAngle = 0;
-            spinLastAngle = Double.NaN;
-            spinInitialRadius = Double.NaN;
-            spinCenter = new Point(Left + (int)Math.Round(132 * units), Top + (int)Math.Round(151 * units));
-        }
-
-        // Keep the pet still while we decide whether the user is drawing a
-        // circle.  A straight head drag exits this tracker once it leaves the
-        // head-sized ring and immediately resumes the original move path.
-        private bool TrackHeadSpinGesture(Point delta)
-        {
-            headSpinMoved |= Math.Abs(delta.X) > SystemInformation.DragSize.Width / 2
-                || Math.Abs(delta.Y) > SystemInformation.DragSize.Height / 2;
-            double x = (MousePosition.X - spinCenter.X) / units;
-            double y = (MousePosition.Y - spinCenter.Y) / units;
-            double radius = Math.Sqrt(x * x + y * y);
-            if (radius > 122)
-            {
-                headSpinTracking = false;
-                return false;
-            }
-            // There is no stable angle close to the centre of the head.  Reset
-            // the sampling point there so a straight drag cannot look circular.
-            if (radius < 21)
-            {
-                spinLastAngle = Double.NaN;
-                return true;
-            }
-            if (Double.IsNaN(spinInitialRadius)) spinInitialRadius = radius;
-            // A regular drag quickly moves away from the grab radius.  Leave
-            // gesture mode immediately in that case so head dragging remains
-            // smooth instead of waiting for the mouse to leave the whole ring.
-            if (Math.Abs(radius - spinInitialRadius) > 34 && Math.Abs(spinAccumulatedAngle) < 1.15)
-            {
-                headSpinTracking = false;
-                return false;
-            }
-            double angle = Math.Atan2(y, x);
-            if (!Double.IsNaN(spinLastAngle))
-            {
-                double change = angle - spinLastAngle;
-                while (change > Math.PI) change -= Math.PI * 2;
-                while (change < -Math.PI) change += Math.PI * 2;
-                // One sampled step above roughly 65 degrees is a jump rather
-                // than a smooth hand-drawn arc, so ignore it for recognition.
-                if (Math.Abs(change) <= 1.15)
-                {
-                    if (Math.Abs(spinAccumulatedAngle) > 0.22
-                        && Math.Sign(change) != Math.Sign(spinAccumulatedAngle)
-                        && Math.Abs(change) > 0.10)
-                        spinAccumulatedAngle += change * 0.20;
-                    else spinAccumulatedAngle += change;
-
-                    // About one complete, consistently directed loop is enough
-                    // to feel intentional, while staying comfortably forgiving.
-                    if (Math.Abs(spinAccumulatedAngle) >= Math.PI * 1.7)
-                    {
-                        StartSpin(spinAccumulatedAngle >= 0 ? 1 : -1);
-                        headSpinTracking = false;
-                        return true;
-                    }
-                }
-            }
-            spinLastAngle = angle;
-            return true;
-        }
-
-        private void StartSpin(int direction)
-        {
-            if (spinning) return;
-            CancelDesktopEating();
-            CancelRicePose();
-            Wake();
-            poseName = null;
-            turnUntil = 0;
-            walkUntil = 0; walkRemainder = 0; walkVerticalRemainder = 0; followingStep = false;
-            spinDirection = direction >= 0 ? 1 : -1;
-            spinTurns = random.Next(3, 6);
-            spinStartedAt = watch.Elapsed.TotalSeconds;
-            // Three to five full turns get a little more airtime, but remain
-            // short enough to read as a crisp, responsive hand interaction.
-            spinUntil = spinStartedAt + 1.12 + spinTurns * 0.29;
-            nextWalk = spinUntil + 2.2;
-            spinning = true;
-            string line = random.Next(2) == 0 ? "晕鱼了，晕鱼了" : "起飞！起飞！";
-            Say(line, 3.1);
-            SpeakSpinLine(line);
-            AddHearts(10);
-            RenderFrame();
-        }
-
-        private void SpeakSpinLine(string line)
-        {
-            try
-            {
-                if (interactionVoice == null)
-                {
-                    interactionVoice = new SpeechSynthesizer();
-                    interactionVoice.Rate = 1;
-                    foreach (InstalledVoice voice in interactionVoice.GetInstalledVoices())
-                    {
-                        if (voice.Enabled && voice.VoiceInfo.Culture.Name.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
-                        {
-                            interactionVoice.SelectVoice(voice.VoiceInfo.Name);
-                            break;
-                        }
-                    }
-                }
-                interactionVoice.SpeakAsyncCancelAll();
-                interactionVoice.SpeakAsync(line);
-            }
-            catch { }
-        }
-
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
             if (e.Button != MouseButtons.Left) return;
             clickTimer.Stop();
             mouseHeld = true; dragging = false; downMouse = MousePosition; downLocation = Location; Capture = true;
-            if (!spinning && IsHeadGrab(e.Location)) BeginHeadSpinTracking();
-            else { headSpinTracking = false; headSpinMoved = false; }
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
@@ -1218,8 +1048,6 @@ namespace LittleDeepSeek
             base.OnMouseMove(e);
             if (!mouseHeld) return;
             Point delta = new Point(MousePosition.X - downMouse.X, MousePosition.Y - downMouse.Y);
-            if (spinning) return;
-            if (headSpinTracking && TrackHeadSpinGesture(delta)) return;
             if (!dragging && (Math.Abs(delta.X) > SystemInformation.DragSize.Width / 2 || Math.Abs(delta.Y) > SystemInformation.DragSize.Height / 2))
             {
                 CancelDesktopEating(); CancelRicePose(); dragging = true; ResetPetClicks(); Cursor = Cursors.SizeAll;
@@ -1238,18 +1066,7 @@ namespace LittleDeepSeek
             if (e.Button == MouseButtons.Right) { ResetPetClicks(); menu.Show(this, e.Location); return; }
             if (e.Button != MouseButtons.Left) return;
             bool wasDrag = dragging;
-            bool wasSpin = spinning;
-            bool releasedHeadDrag = headSpinTracking && headSpinMoved;
-            headSpinTracking = false; headSpinMoved = false;
             mouseHeld = false; dragging = false; Capture = false; Cursor = Cursors.Hand;
-            if (wasSpin) { ResetPetClicks(); return; }
-            if (!wasDrag && releasedHeadDrag)
-            {
-                Point delta = new Point(MousePosition.X - downMouse.X, MousePosition.Y - downMouse.Y);
-                FaceMovement(delta.X, delta.Y);
-                Location = ClampToScreen(new Point(downLocation.X + delta.X, downLocation.Y + delta.Y));
-                wasDrag = true;
-            }
             if (wasDrag)
             {
                 ResetPetClicks();
@@ -1275,7 +1092,7 @@ namespace LittleDeepSeek
         {
             base.OnMouseCaptureChanged(e);
             if (Capture) return;
-            if (mouseHeld) { mouseHeld = false; dragging = false; headSpinTracking = false; headSpinMoved = false; ResetPetClicks(); Cursor = Cursors.Hand; Save(); }
+            if (mouseHeld) { mouseHeld = false; dragging = false; ResetPetClicks(); Cursor = Cursors.Hand; Save(); }
         }
 
         protected override void OnMouseWheel(MouseEventArgs e)
@@ -1289,7 +1106,6 @@ namespace LittleDeepSeek
         {
             double now = watch.Elapsed.TotalSeconds;
             float dt = (float)Math.Min(0.1, Math.Max(0, now - lastTick)); lastTick = now;
-            if (spinning && now >= spinUntil) spinning = false;
             if (poseName != null && now >= poseUntil) poseName = null;
             for (int i = hearts.Count - 1; i >= 0; i--)
             {
@@ -1299,8 +1115,8 @@ namespace LittleDeepSeek
             TickDesktopEating(dt);
             followingStep = false;
             TickDshAnimations(now);
-            if (!DesktopEatingActive && !RicePoseActive && !IsDshAnimationActive(now) && !settings.FollowMouse && (settings.Walk || settings.LivelyRoam)
-                && !settings.Sleep && !mouseHeld && !spinning && !menu.Visible)
+            if (CanUseMovementGap(now) && !DesktopEatingActive && !RicePoseActive && !IsDshAnimationActive(now) && !settings.FollowMouse && (settings.Walk || settings.LivelyRoam)
+                && !settings.Sleep && !mouseHeld && !menu.Visible)
             {
                 if (now >= nextWalk)
                 {
@@ -1311,6 +1127,7 @@ namespace LittleDeepSeek
                     if (random.Next(3) == 0) { walkDirection = 0; walkVerticalDirection = random.Next(2) == 0 ? -1 : 1; }
                     FaceMovement(walkDirection * 100, walkVerticalDirection * 100);
                     walkUntil = now + 3 + random.NextDouble() * 2; nextWalk = walkUntil + 2 + random.Next(4);
+                    if (settings.DshAnimations) walkUntil = Math.Min(walkUntil, cuteQueue.ReadyAt);
                 }
                 if (now < walkUntil)
                 {
@@ -1328,8 +1145,8 @@ namespace LittleDeepSeek
                     }
                 }
             }
-            else if (!DesktopEatingActive && !RicePoseActive && settings.FollowMouse && !settings.Sleep
-                && !mouseHeld && !spinning && !menu.Visible && poseName == null)
+            else if (CanUseMovementGap(now) && !DesktopEatingActive && !RicePoseActive && settings.FollowMouse && !settings.Sleep
+                && !mouseHeld && !menu.Visible && poseName == null)
             {
                 TickFollowMouse(dt);
             }
@@ -1365,6 +1182,11 @@ namespace LittleDeepSeek
             g.Restore(state);
         }
 
+        private bool MirrorMovementSprite(int view, int side)
+        {
+            return view == ViewSide && ((side < 0) != (currentSkin != null && currentSkin.SideFacesLeft));
+        }
+
         private void RenderFrame()
         {
             if (!ready || closing || !Visible) return;
@@ -1380,8 +1202,8 @@ namespace LittleDeepSeek
                 double now = watch.Elapsed.TotalSeconds;
                 bool ricePose = !DesktopEatingActive && RicePoseActive;
                 float bob = settings.Sleep ? (float)Math.Sin(now * 1.6) * 1.3f : (float)Math.Sin(now * 2.8) * 2.7f;
-                float jump = now < jumpUntil ? (float)Math.Sin((0.75 - (jumpUntil - now)) / 0.75 * Math.PI) * 34 : 0;
-                float angle = now < happyUntil ? (float)Math.Sin(now * 18) * 4 : 0;
+                float jump = now < jumpUntil ? (float)Math.Sin((JumpAnimationDuration - (jumpUntil - now)) / JumpAnimationDuration * Math.PI) * 34 : 0;
+                float angle = now < happyUntil ? (float)Math.Sin(now * DshAnimationPlaybackRate * 18) * 4 : 0;
                 float reactionScale = 1;
                 if (((settings.Walk || settings.LivelyRoam) && now < walkUntil || followingStep) && !settings.Sleep && !mouseHeld)
                 { bob += (float)Math.Sin(now * 14) * 2; angle = (float)Math.Sin(now * 11) * 2; }
@@ -1406,7 +1228,7 @@ namespace LittleDeepSeek
                 {
                     // Use the same lightweight visual language as petting and jumping:
                     // a quick entrance bounce, a happy wiggle, gentle breathing, and hearts.
-                    double elapsed = Math.Max(0, RicePoseDuration - (poseUntil - now));
+                    double elapsed = Math.Max(0, RicePoseDuration - (poseUntil - now)) * DshAnimationPlaybackRate;
                     double intro = Math.Min(1, elapsed / 0.42);
                     double eased = 1 - Math.Pow(1 - intro, 3);
                     reactionScale = (float)(0.92 + 0.08 * eased);
@@ -1415,19 +1237,6 @@ namespace LittleDeepSeek
                     angle = elapsed < 1.15 ? (float)Math.Sin(elapsed * 15) * 3.2f
                         : (float)Math.Sin((elapsed - 1.15) * 2.5) * 0.8f;
                 }
-                float spinProgress = 0;
-                if (spinning)
-                {
-                    spinProgress = (float)Math.Max(0, Math.Min(1, (now - spinStartedAt) / (spinUntil - spinStartedAt)));
-                    // Cubic easing starts with a tiny anticipation and settles
-                    // softly.  The small wobble adds spring without changing the
-                    // promised three-to-five full rotations.
-                    float eased = 1 - (float)Math.Pow(1 - spinProgress, 3);
-                    float wobble = (float)Math.Sin(spinProgress * Math.PI * 12) * (1 - spinProgress) * 6.5f;
-                    angle += spinDirection * spinTurns * 360f * eased + wobble;
-                    reactionScale *= 1 + (float)Math.Sin(spinProgress * Math.PI * 5) * 0.055f + (1 - spinProgress) * 0.025f;
-                    bob += (float)Math.Sin(spinProgress * Math.PI * 8) * 4.5f;
-                }
                 Rectangle src = crop;
                 Bitmap body = art;
                 bool showPose = false;
@@ -1435,6 +1244,7 @@ namespace LittleDeepSeek
                 Bitmap dshFrame = null;
                 Rectangle dshFrameCrop = Rectangle.Empty;
                 bool showDshClip = dshAnimation && TryGetDshAnimation(now, out dshFrame, out dshFrameCrop);
+                bool showRetargetedClip = dshAnimation && !currentSkin.UsesNativeClips;
                 if (!DesktopEatingActive && settings.Sleep && sleepArt != null) { body = sleepArt; src = sleepCrop; showPose = true; }
                 else if (!DesktopEatingActive && poseName == "flower" && flowerArt != null) { body = flowerArt; src = flowerCrop; showPose = true; }
                 else if (ricePose && riceArt != null) { body = riceArt; src = riceCrop; showPose = true; }
@@ -1442,7 +1252,7 @@ namespace LittleDeepSeek
                 int currentSide = sideFacing;
                 if (!showPose) GetMovementSprite(currentView, out body, out src);
                 float dshScaleX = 1, dshScaleY = 1, dshSwayX = 0, dshBob = 0, dshAngle = 0;
-                if (dshAnimation && !showPose && !showDshClip)
+                if (dshAnimation && !showPose && !showDshClip && !showRetargetedClip)
                 {
                     // A damaged/missing GIF falls back to a small original-art motion.
                     GetDshOriginalArtTransform(now, out dshScaleX, out dshScaleY, out dshSwayX, out dshBob, out dshAngle);
@@ -1453,18 +1263,21 @@ namespace LittleDeepSeek
                 if (showPose) { float poseScale = Math.Min(252f / src.Width, (ricePose ? 222f : 240f) / src.Height); w = src.Width * poseScale; h = src.Height * poseScale; }
                 else { h = 222; w = h * src.Width / src.Height; }
                 using (SolidBrush shadow = new SolidBrush(Color.FromArgb(25, 51, 83, 139))) g.FillEllipse(shadow, 78 + jump / 4, 317, 108 - jump / 2, 10);
-                if (spinning) DrawSpinOrbit(g, now, spinProgress);
                 GraphicsState pose = g.Save();
                 g.TranslateTransform(132 + dshSwayX, 312 + bob - jump);
                 g.RotateTransform(angle);
                 g.ScaleTransform(reactionScale * dshScaleX, reactionScale * dshScaleY);
-                if (showDshClip && !showPose)
+                if (showRetargetedClip && !showPose)
+                {
+                    SharedPetAnimations.Draw(g, currentSkin, SampleDshAnimation(now));
+                }
+                else if (showDshClip && !showPose)
                 {
                     // These clips are the same approved blue maid character used by
                     // the DSH pet. Cross-fade for a short moment so entering or
                     // leaving a random action never looks like a hard sprite swap.
                     float clipOpacity = GetDshAnimationOpacity(now);
-                    DrawCharacterSprite(g, body, src, h, currentView == ViewSide && currentSide < 0, 1 - clipOpacity);
+                    DrawCharacterSprite(g, body, src, h, MirrorMovementSprite(currentView, currentSide), 1 - clipOpacity);
                     float clipHeight = 232;
                     DrawCharacterSprite(g, dshFrame, dshFrameCrop, clipHeight, false, clipOpacity);
                 }
@@ -1473,17 +1286,17 @@ namespace LittleDeepSeek
                     double progress = Math.Max(0, Math.Min(1, 1 - (turnUntil - now) / 0.26));
                     Bitmap previousBody; Rectangle previousSource;
                     GetMovementSprite(previousViewDirection, out previousBody, out previousSource);
-                    DrawCharacterSprite(g, previousBody, previousSource, h, previousViewDirection == ViewSide && previousSideFacing < 0, (float)(1 - progress));
-                    DrawCharacterSprite(g, body, src, h, currentView == ViewSide && currentSide < 0, (float)progress);
+                    DrawCharacterSprite(g, previousBody, previousSource, h, MirrorMovementSprite(previousViewDirection, previousSideFacing), (float)(1 - progress));
+                    DrawCharacterSprite(g, body, src, h, MirrorMovementSprite(currentView, currentSide), (float)progress);
                 }
                 else
                 {
-                    DrawCharacterSprite(g, body, src, h, currentView == ViewSide && currentSide < 0, 1);
+                    DrawCharacterSprite(g, body, src, h, MirrorMovementSprite(currentView, currentSide), 1);
                 }
-                if (dshAnimation && !showPose && !showDshClip) DrawDshOriginalArtEffects(g, now);
+                if (dshAnimation && !showPose && !showDshClip && !showRetargetedClip) DrawDshOriginalArtEffects(g, now);
                 if (deleteStage == 2) DrawEatingMouth(g);
                 g.Restore(pose);
-                DrawName(g, DesktopEatingActive ? (deleteStage == 2 ? "小deepseek  ·  啊呜！" : "小deepseek  ·  哒哒哒") : ricePose ? "小deepseek  ·  吃白饭" : settings.Sleep ? "小deepseek  ·  休息中" : "小deepseek");
+                DrawName(g, GetPetCaption());
                 if (!DesktopEatingActive && settings.Sleep && !showPose)
                 {
                     using (Font font = new Font("Segoe UI", 18, FontStyle.Bold, GraphicsUnit.Pixel))
@@ -1549,34 +1362,11 @@ namespace LittleDeepSeek
             }
         }
 
-        private void DrawSpinOrbit(Graphics g, double now, float progress)
-        {
-            float fade = Math.Min(1f, progress * 5) * Math.Min(1f, (1 - progress) * 7 + 0.3f);
-            float phase = (float)(now * 14 * spinDirection);
-            using (Pen arc = new Pen(Color.FromArgb((int)(fade * 118), 105, 176, 246), 2.3f))
-            using (SolidBrush blue = new SolidBrush(Color.FromArgb((int)(fade * 205), 111, 187, 255)))
-            using (SolidBrush pink = new SolidBrush(Color.FromArgb((int)(fade * 205), 248, 140, 191)))
-            {
-                for (int i = 0; i < 3; i++)
-                {
-                    float a = phase + i * (float)(Math.PI * 2 / 3);
-                    float radiusX = 89 + (float)Math.Sin(progress * Math.PI + i) * 7;
-                    float radiusY = 57 + (float)Math.Cos(progress * Math.PI + i) * 5;
-                    float x = 132 + (float)Math.Cos(a) * radiusX;
-                    float y = 202 + (float)Math.Sin(a) * radiusY;
-                    g.FillEllipse(i % 2 == 0 ? blue : pink, x - 4.5f, y - 4.5f, 9, 9);
-                }
-                g.DrawArc(arc, 39, 143, 186, 118, (float)(phase * 57.3), 116);
-                g.DrawArc(arc, 50, 151, 164, 102, (float)(phase * 57.3 + 180), 92);
-            }
-        }
-
         private void BringPetBack()
         {
             Location = ClampToScreen(Location);
             if (!Visible) Show();
             TopMost = settings.Top;
-            if (settings.StatusBoardVisible) ShowStatusBoard();
             BringToFront();
             lastTick = watch.Elapsed.TotalSeconds; timer.Start();
             Say("我回来啦！一直都在哦。", 4); RenderFrame();
@@ -1603,7 +1393,7 @@ namespace LittleDeepSeek
             closing = true; timer.Stop(); clickTimer.Stop(); Save(); StopDesktopMonitoring(); CancelDesktopEating();
             StopTodoReminders();
             if (todoWindow != null && !todoWindow.IsDisposed) todoWindow.Dispose();
-            if (statusBoard != null && !statusBoard.IsDisposed) statusBoard.Shutdown();
+            if (campusMapWindow != null && !campusMapWindow.IsDisposed) campusMapWindow.Dispose();
             Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= DisplayChanged;
             tray.Visible = false;
             base.OnFormClosing(e);
@@ -1614,19 +1404,13 @@ namespace LittleDeepSeek
             if (disposing)
             {
                 timer.Dispose(); clickTimer.Dispose();
-                if (interactionVoice != null) { try { interactionVoice.SpeakAsyncCancelAll(); interactionVoice.Dispose(); } catch { } interactionVoice = null; }
                 DisposeDshAnimations();
                 StopTodoReminders();
                 StopDesktopMonitoring(); CancelDesktopEating();
                 if (todoWindow != null) { todoWindow.Dispose(); todoWindow = null; }
-                if (statusBoard != null) { statusBoard.Dispose(); statusBoard = null; }
+                if (campusMapWindow != null) { campusMapWindow.Dispose(); campusMapWindow = null; }
                 if (tray != null) tray.Dispose();
-                menu.Dispose(); art.Dispose(); petIcon.Dispose();
-                if (sideArt != null) sideArt.Dispose();
-                if (backArt != null) backArt.Dispose();
-                if (sleepArt != null) sleepArt.Dispose();
-                if (flowerArt != null) flowerArt.Dispose();
-                if (riceArt != null) riceArt.Dispose();
+                menu.Dispose(); DisposeSkins(); petIcon.Dispose();
             }
             base.Dispose(disposing);
         }

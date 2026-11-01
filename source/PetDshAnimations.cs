@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -17,26 +17,14 @@ namespace LittleDeepSeek
         private Bitmap dshAnimationFrame;
         private Rectangle dshAnimationCrop;
         private string dshAnimationFrameName, dshAnimationName;
-        private string lastDshRandomAnimation;
         private int dshAnimationFrameIndex = -1;
-        private double dshAnimationStartedAt, dshAnimationUntil, nextDshAnimation;
-        // The source clips are 10 fps.  Play them a touch faster while keeping
-        // the change modest enough that breathing and small gestures stay natural.
-        private const double DshAnimationPlaybackRate = 1.15;
+        private double dshAnimationStartedAt, dshAnimationUntil;
+        // All cute interactions share this clock, including skin pose timelines.
+        private const double DshAnimationPlaybackRate = 1.1;
         private const double DshAnimationFrameRate = 10.0 * DshAnimationPlaybackRate;
         // A very short transition avoids a hard pop without leaving two differently
         // styled character outlines on screen long enough to read as a blurry edge.
-        private const double DshAnimationFadeSeconds = 0.16;
-
-        // Match the DSH pet's rhythm: a few quiet breathing beats are mixed
-        // between distinct actions instead of endlessly alternating left/right.
-        // Repeating idle-breath here gives the action loop a soft landing without
-        // forcing the roaming code to pretend it is an animation clip.
-        private static readonly string[] DshRandomAnimations =
-        {
-            "idle-breath", "idle-breath", "idle-breath",
-            "stretch", "yawn", "think", "daydream", "note", "bubbles"
-        };
+        private const double DshAnimationFadeSeconds = 0.16 / DshAnimationPlaybackRate;
 
         private void InitializeDshAnimations()
         {
@@ -64,9 +52,8 @@ namespace LittleDeepSeek
 
         private void ScheduleDshAnimations(double now)
         {
-            // Continuous mode: once the pet is free, start (or resume with) an
-            // original-art motion immediately instead of waiting for a quiet gap.
-            nextDshAnimation = now;
+            cuteQueue.After(CuteInteractionEnd(now));
+            if (settings.DshAnimations) nextWalk = Math.Min(nextWalk, CuteInteractionEnd(now) + .1);
         }
 
         private void TickDshAnimations(double now)
@@ -74,56 +61,25 @@ namespace LittleDeepSeek
             if (!settings.DshAnimations) return;
             if (!String.IsNullOrEmpty(dshAnimationName) && now < dshAnimationUntil) return;
             if (!String.IsNullOrEmpty(dshAnimationName)) dshAnimationName = null;
-            if (now < nextDshAnimation) return;
-            if (!CanShowDshRandomAnimation(now)) return;
-            StartDshAnimation(PickDshRandomAnimation(), 9.7);
-            // The following Tick starts another real DSH clip as soon as this one
-            // finishes. Menus, dragging, sleep, speech, and other interactions
-            // still pause the loop through CanShowDshRandomAnimation.
-            nextDshAnimation = dshAnimationUntil;
+            if (poseName != null && now < poseUntil || now < jumpUntil || now < happyUntil || now < speechUntil)
+            {
+                ScheduleDshAnimations(now); return;
+            }
+            if (!CanShowDshRandomAnimation(now)) { cuteQueue.Postpone(now); return; }
+            if (!cuteQueue.IsReady(now)) return;
+            PlayCuteInteraction(cuteQueue.Next(now), true);
         }
 
         private bool CanShowDshRandomAnimation(double now)
         {
-            return Visible && !settings.Sleep && !menu.Visible && !mouseHeld && !dragging && !spinning && !clickTimer.Enabled
+            return Visible && !settings.Sleep && !menu.Visible && !mouseHeld && !dragging && !clickTimer.Enabled
                 && !DesktopEatingActive && !RicePoseActive && poseName == null && now >= jumpUntil && now >= happyUntil
-                && now >= speechUntil && !settings.FollowMouse && !followingStep && now >= walkUntil;
-        }
-
-        private string PickDshChatAnimation()
-        {
-            string[] choices = { "think", "daydream", "note", "bubbles" };
-            return choices[random.Next(choices.Length)];
-        }
-
-        private string PickDshRandomAnimation()
-        {
-            // idle-breath deliberately has several entries to weight it. Exclude
-            // every matching entry, not just its first slot, so the pet never
-            // chains the same clip back-to-back.
-            int available = 0;
-            foreach (string name in DshRandomAnimations)
-                if (!String.Equals(name, lastDshRandomAnimation, StringComparison.Ordinal)) available++;
-            if (available == 0) return lastDshRandomAnimation ?? "idle-breath";
-            int pick = random.Next(available);
-            foreach (string name in DshRandomAnimations)
-            {
-                if (String.Equals(name, lastDshRandomAnimation, StringComparison.Ordinal)) continue;
-                if (pick-- == 0)
-                {
-                    lastDshRandomAnimation = name;
-                    return name;
-                }
-            }
-            // Defensive fallback for a malformed list; initialization always
-            // supplies at least idle-breath and one non-idle action.
-            lastDshRandomAnimation = "idle-breath";
-            return lastDshRandomAnimation;
+                && now >= speechUntil;
         }
 
         private void StartDshAnimation(string name, double seconds)
         {
-            if (!settings.DshAnimations || !dshAnimationImages.ContainsKey(name)) return;
+            if (!SharedPetAnimations.Contains(name)) return;
             dshAnimationName = name;
             dshAnimationStartedAt = watch.Elapsed.TotalSeconds;
             // Keep the animation's lifetime in sync with its faster frame clock;
@@ -132,15 +88,22 @@ namespace LittleDeepSeek
             // A DSH-style random action owns the stage.  Do not let autonomous
             // wandering change the view halfway through and hide the motion.
             walkUntil = 0; walkRemainder = 0; walkVerticalRemainder = 0;
-            nextWalk = dshAnimationUntil + 0.45;
+            ScheduleDshAnimations(dshAnimationStartedAt);
             dshAnimationFrameName = null;
             dshAnimationFrameIndex = -1;
+        }
+
+        private PetActionSample SampleDshAnimation(double now)
+        {
+            return SharedPetAnimations.Sample(dshAnimationName,
+                (now - dshAnimationStartedAt) * DshAnimationPlaybackRate,
+                (dshAnimationUntil - dshAnimationStartedAt) * DshAnimationPlaybackRate);
         }
 
         private bool TryGetDshAnimation(double now, out Bitmap frame, out Rectangle crop)
         {
             frame = null; crop = Rectangle.Empty;
-            if (!settings.DshAnimations || DesktopEatingActive || RicePoseActive || spinning || mouseHeld || dragging) return false;
+            if (!SkinUsesDshClips || DesktopEatingActive || RicePoseActive || mouseHeld || dragging) return false;
             string name = null;
             double elapsed = now;
             // Keep LittleDeepSeek's own high-resolution illustration for ordinary idle and sleep.
@@ -166,9 +129,9 @@ namespace LittleDeepSeek
 
         private bool IsDshAnimationActive(double now)
         {
-            return settings.DshAnimations && !String.IsNullOrEmpty(dshAnimationName)
+            return !settings.Sleep && !String.IsNullOrEmpty(dshAnimationName)
                 && now < dshAnimationUntil && !DesktopEatingActive && !RicePoseActive
-                && !spinning && !mouseHeld && !dragging;
+                && !mouseHeld && !dragging;
         }
 
         // Fallback only: normally RenderFrame presents the matching DSH GIF frame.
@@ -178,7 +141,7 @@ namespace LittleDeepSeek
         {
             scaleX = 1; scaleY = 1; swayX = 0; bob = 0; angle = 0;
             if (!IsDshAnimationActive(now)) return;
-            double elapsed = Math.Max(0, now - dshAnimationStartedAt);
+            double elapsed = Math.Max(0, now - dshAnimationStartedAt) * DshAnimationPlaybackRate;
             float slow = (float)Math.Sin(elapsed * 3.1);
             float quick = (float)Math.Sin(elapsed * 7.4);
             switch (dshAnimationName)
@@ -221,7 +184,7 @@ namespace LittleDeepSeek
         private void DrawDshOriginalArtEffects(Graphics g, double now)
         {
             if (!IsDshAnimationActive(now)) return;
-            float pulse = (float)((Math.Sin((now - dshAnimationStartedAt) * 4.2) + 1) * 0.5);
+            float pulse = (float)((Math.Sin((now - dshAnimationStartedAt) * DshAnimationPlaybackRate * 4.2) + 1) * 0.5);
             int alpha = 205 + (int)(45 * pulse);
             string name = dshAnimationName ?? "";
             if (name == "stretch")

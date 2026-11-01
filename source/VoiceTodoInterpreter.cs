@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -278,7 +278,7 @@ namespace LittleDeepSeek
 
         private static string StripPoliteness(string text)
         {
-            text = Regex.Replace(text, @"^小deepseek[，,\s]*", "", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"^(?:楠小秾|小deepseek)[，,\s]*", "", RegexOptions.IgnoreCase);
             return Regex.Replace(text, @"^(?:(?:请(?:你)?|麻烦(?:你)?|帮我|替我|给我)[，,\s]*)+", "").Trim();
         }
 

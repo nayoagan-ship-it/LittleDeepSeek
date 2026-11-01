@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Windows.Forms;
 
@@ -26,7 +26,7 @@ namespace LittleDeepSeek
             }
             if (todoWindow == null || todoWindow.IsDisposed)
             {
-                todoWindow = new TodoForm(Path.Combine(Path.GetDirectoryName(settings.PathName), "todo-webview"), petIcon);
+                todoWindow = new TodoForm(Path.Combine(Path.GetDirectoryName(settings.PathName), "todo-webview"), petIcon, identity);
                 todoWindow.TasksSnapshotReceived += OnTodoSnapshot;
                 todoWindow.SnapshotFailed += delegate
                 {
@@ -95,7 +95,7 @@ namespace LittleDeepSeek
                 settings.TodoReminders = !settings.TodoReminders;
                 if (todoState != null) todoState.SkipPendingPraise();
                 if (!settings.TodoReminders && todoSpeech)
-                { speechUntil = 0; todoSpeech = false; Text = "小deepseek"; RenderFrame(); }
+                { speechUntil = 0; todoSpeech = false; Text = PetName; RenderFrame(); }
                 ScheduleTodoReminder();
                 todoReminderItem.Checked = settings.TodoReminders;
                 Save();

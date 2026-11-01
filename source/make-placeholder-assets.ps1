@@ -35,3 +35,4 @@ foreach ($name in $images.Keys) {
     }
     finally { $brush.Dispose(); $graphics.Dispose(); $bitmap.Dispose() }
 }
+& (Join-Path $PSScriptRoot 'make-placeholder-skins.ps1') -OutputDirectory $OutputDirectory

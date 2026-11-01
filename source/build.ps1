@@ -49,6 +49,20 @@ foreach ($animation in @('idle-breath','stretch','yawn','nap','think','daydream'
     $animationPath = Join-Path $AssetDirectory ("animations\$animation.gif")
     if (Test-Path -LiteralPath $animationPath -PathType Leaf) { $compilerArgs += "/resource:$animationPath,LittleDeepSeek.dsh.$animation.gif" }
 }
+$defaultSkinFolder = Join-Path $AssetDirectory 'skins\default'
+$defaultSkinManifest = Join-Path $defaultSkinFolder 'skin.json'
+if (Test-Path -LiteralPath $defaultSkinManifest -PathType Leaf) {
+    $definition = Get-Content -LiteralPath $defaultSkinManifest -Raw | ConvertFrom-Json
+    $compilerArgs += "/resource:$defaultSkinManifest,LittleDeepSeek.skin.default.json"
+    $skinImages = @($definition.poses.PSObject.Properties | ForEach-Object { $_.Value.image } | Sort-Object -Unique)
+    foreach ($image in $skinImages) {
+        $skinImage = [IO.Path]::GetFullPath((Join-Path $defaultSkinFolder $image))
+        $skinRoot = [IO.Path]::GetFullPath($defaultSkinFolder).TrimEnd('\') + '\'
+        if (-not $skinImage.StartsWith($skinRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Default skin images must remain in the skin folder.' }
+        if (-not (Test-Path -LiteralPath $skinImage -PathType Leaf)) { throw "Missing default skin image: $image" }
+        $compilerArgs += "/resource:$skinImage,LittleDeepSeek.skin.default.$image"
+    }
+}
 $compilerArgs += $sourceFiles
 & $compiler @compilerArgs
 if ($LASTEXITCODE -ne 0) { throw "C# compilation failed with exit code $LASTEXITCODE." }
@@ -58,6 +72,14 @@ foreach ($dependency in @($webViewCore,$webViewForms,$webViewLoader)) {
 $todoOutput = Join-Path $outputDirectory 'todo-app'
 $null = New-Item -ItemType Directory -Path $todoOutput -Force
 Get-ChildItem -LiteralPath (Join-Path $projectRoot 'todo-app') -Force | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $todoOutput -Recurse -Force }
+$skinsInput = Join-Path $AssetDirectory 'skins'
+if (Test-Path -LiteralPath $skinsInput -PathType Container) {
+    $skinsOutput = Join-Path $outputDirectory 'assets\skins'
+    New-Item -ItemType Directory -Path $skinsOutput -Force | Out-Null
+    Get-ChildItem -LiteralPath $skinsInput -Directory | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $skinsOutput -Recurse -Force
+    }
+}
 foreach ($notice in @('LICENSE','THIRD_PARTY_NOTICES.md','ASSETS.md')) { Copy-Item -LiteralPath (Join-Path $projectRoot $notice) -Destination $outputDirectory -Force }
 Copy-Item -LiteralPath (Join-Path $projectRoot 'licenses') -Destination $outputDirectory -Recurse -Force
 Write-Host "Build complete: $outputFile"

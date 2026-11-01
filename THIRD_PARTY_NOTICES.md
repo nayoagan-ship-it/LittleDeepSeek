@@ -1,4 +1,4 @@
-# Third-party notices
+﻿# Third-party notices
 
 Original project code and the geometric placeholder generator are licensed under the root MIT LICENSE.
 Third-party components retain their own copyright and license terms. The MIT license does not grant rights to DeepSeek trademarks or third-party character designs.
@@ -28,3 +28,8 @@ That material is not relicensed by this project. Development builds use only the
 
 DeepSeek Harness is a separate user-installed program; its code, account configuration, credentials and runtime data are not bundled here.
 The weather integration can query wttr.in on demand. No weather dataset is bundled.
+
+## Campus map service
+
+The optional hosted campus map uses AMap and DeepSeek APIs under the maintainer's runtime configuration. No private provider credentials or local database are distributed.
+Campus point data comes from NJAU-Map; its MIT license is retained in `campus-service/LICENSE-NJAU-Map.txt`. SDK/map tiles are loaded from AMap at runtime and are not relicensed as project source.

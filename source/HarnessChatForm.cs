@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -14,6 +14,8 @@ namespace LittleDeepSeek
     // request and presents its streamed progress and final answer.
     internal sealed class HarnessChatForm : Form
     {
+        private readonly PetIdentity identity;
+        private string PetName { get { return identity.Name; } }
         private readonly TextBox requestBox;
         private readonly TextBox resultBox;
         private readonly Button submitButton;
@@ -22,9 +24,10 @@ namespace LittleDeepSeek
         private Process runningProcess;
         private bool closing;
 
-        internal HarnessChatForm(Icon icon)
+        internal HarnessChatForm(Icon icon, PetIdentity identity = null)
         {
-            Text = "小deepseek · deepseek求索";
+            this.identity = identity ?? new PetIdentity();
+            this.identity.Bind(this, "{pet} · deepseek求索");
             Icon = icon;
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(650, 540);
@@ -47,16 +50,17 @@ namespace LittleDeepSeek
                 using (Pen outline = new Pen(Color.FromArgb(210, 225, 255), 1.5f)) e.Graphics.DrawEllipse(outline, 1, 1, badge.Width - 3, badge.Height - 3);
             };
             Label title = new Label { Text = "deepseek 求索", AutoSize = true, BackColor = Color.Transparent, ForeColor = Color.White, Font = new Font("Microsoft YaHei UI", 19f, FontStyle.Bold), Location = new Point(91, 25) };
-            Label subtitle = new Label { Text = "小deepseek 的智能工作台 · 可选接入 DeepSeek Harness", AutoSize = true, BackColor = Color.Transparent, ForeColor = Color.FromArgb(225, 237, 255), Font = new Font("Microsoft YaHei UI", 9.5f), Location = new Point(94, 62) };
+            Label subtitle = new Label { Text = PetName + " 的智能工作台 · 已接入 DeepSeek Harness", AutoSize = true, BackColor = Color.Transparent, ForeColor = Color.FromArgb(225, 237, 255), Font = new Font("Microsoft YaHei UI", 9.5f), Location = new Point(94, 62) };
             Label headerHint = new Label { Text = "把想做的事交给我", AutoSize = true, BackColor = Color.Transparent, ForeColor = Color.FromArgb(218, 232, 255), Font = new Font("Microsoft YaHei UI", 9f), Anchor = AnchorStyles.Top | AnchorStyles.Right, Location = new Point(590, 90) };
             header.Controls.Add(badge);
             header.Controls.Add(title);
+            this.identity.Bind(subtitle, "{pet} 的智能工作台 · 已接入 DeepSeek Harness");
             header.Controls.Add(subtitle);
             header.Controls.Add(headerHint);
 
             Panel requestCard = CreateCard(new Point(18, 140), new Size(724, 170), AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right);
             Label requestLabel = new Label { Text = "这次想完成什么？", AutoSize = true, ForeColor = Color.FromArgb(30, 45, 70), Font = new Font("Microsoft YaHei UI", 11f, FontStyle.Bold), Location = new Point(18, 15) };
-            Label requestHint = new Label { Text = "说明目标、文件或期望结果，小deepseek 会直接交给 Harness 处理。", AutoSize = true, ForeColor = Color.FromArgb(113, 131, 158), Location = new Point(18, 43) };
+            Label requestHint = new Label { Text = "说明目标、文件或期望结果，" + PetName + " 会直接交给 Harness 处理。", AutoSize = true, ForeColor = Color.FromArgb(113, 131, 158), Location = new Point(18, 43) };
             Panel requestSurface = CreateInputSurface(new Point(18, 68), new Size(688, 52), AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right);
             requestBox = new TextBox
             {
@@ -83,6 +87,7 @@ namespace LittleDeepSeek
             stopButton.Enabled = false;
             Label examples = new Label { Text = "试试：检查项目问题  ·  整理一份方案  ·  分析报错原因", AutoSize = true, ForeColor = Color.FromArgb(132, 147, 170), Font = new Font("Microsoft YaHei UI", 8.5f), Location = new Point(18, 136) };
             requestCard.Controls.Add(requestLabel);
+            this.identity.Bind(requestHint, "说明目标、文件或期望结果，{pet} 会直接交给 Harness 处理。");
             requestCard.Controls.Add(requestHint);
             requestCard.Controls.Add(requestSurface);
             requestCard.Controls.Add(examples);
@@ -126,7 +131,7 @@ namespace LittleDeepSeek
             string request = requestBox.Text.Trim();
             if (request.Length == 0)
             {
-                MessageBox.Show(this, "先写下想让小deepseek做的事情吧。", "deepseek求索", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, "先写下想让" + PetName + "做的事情吧。", "deepseek求索", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 requestBox.Focus();
                 return;
             }
@@ -140,7 +145,7 @@ namespace LittleDeepSeek
             }
 
             resultBox.Clear();
-            AppendLine("小deepseek 正在把需求交给 DeepSeek Harness…");
+            AppendLine(PetName + " 正在把需求交给 DeepSeek Harness…");
             SetStatus("●  DeepSeek Harness 正在工作，请稍候…", Color.FromArgb(37, 111, 235));
             submitButton.Enabled = false;
             stopButton.Enabled = true;
@@ -197,7 +202,7 @@ namespace LittleDeepSeek
             submitButton.Enabled = true;
             stopButton.Enabled = false;
             requestBox.Enabled = true;
-            if (!succeeded) AppendLine("\r\n小deepseek：可以检查 Harness 是否已正常启动后重试。");
+            if (!succeeded) AppendLine("\r\n" + PetName + "：可以检查 Harness 是否已正常启动后重试。");
         }
 
         private void StopHarnessTask(bool silent)

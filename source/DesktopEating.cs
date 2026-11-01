@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
@@ -53,6 +53,7 @@ namespace LittleDeepSeek
         // Coordinates of the mouth in the standing sprite's local drawing space.
         private PointF EatingMouthLocal()
         {
+            if (!SkinUsesDshClips) return new PointF(132 + (currentSkin.MouthX - .5f) * 222 * crop.Width / crop.Height, 312 - 222 * (1 - currentSkin.MouthY));
             float ratio = 222f / crop.Height;
             return new PointF(132 + (art.Width * 0.504f - (crop.Left + crop.Width / 2f)) * ratio,
                 312 - (crop.Bottom - art.Height * 0.551f) * ratio);

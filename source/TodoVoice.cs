@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Threading.Tasks;
@@ -12,7 +12,7 @@ namespace LittleDeepSeek
         private Panel voicePanel;
         private RichTextBox voiceConversation;
         private TextBox voiceText;
-        private Label voiceStatus;
+        private Label voiceStatus, voiceHeading;
         private Button voiceStart, voiceStop, voiceExecute;
         private VoiceInputSession voiceSession;
         private bool voiceBusy, voiceDisposed;
@@ -41,8 +41,10 @@ namespace LittleDeepSeek
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-            layout.Controls.Add(new Label { Text = "和小deepseek说一说", Dock = DockStyle.Fill,
-                Font = new Font("Microsoft YaHei UI", 11f, FontStyle.Bold), ForeColor = Color.FromArgb(42, 75, 148) }, 0, 0);
+            voiceHeading = new Label { Text = "和" + PetName + "说一说", Dock = DockStyle.Fill,
+                Font = new Font("Microsoft YaHei UI", 11f, FontStyle.Bold), ForeColor = Color.FromArgb(42, 75, 148) };
+            identity.Bind(voiceHeading, "和{pet}说一说");
+            layout.Controls.Add(voiceHeading, 0, 0);
             layout.Controls.Add(new Label { Text = "试试：添加明天买牛奶  /  买牛奶已经完成", Dock = DockStyle.Fill,
                 Font = new Font("Microsoft YaHei UI", 9f), ForeColor = Color.FromArgb(68, 81, 107) }, 0, 1);
             voiceConversation = new RichTextBox { Dock = DockStyle.Fill, ReadOnly = true,
@@ -60,7 +62,7 @@ namespace LittleDeepSeek
             buttons.Controls.Add(voiceStart);
             buttons.Controls.Add(voiceStop);
             buttons.Controls.Add(MakeVoiceButton("暂不开启", delegate {
-                StopVoiceInput(false); AppendVoice("小deepseek", "好的，麦克风未开启。也可以在下方输入待办指令。");
+                StopVoiceInput(false); AppendVoice(PetName, "好的，麦克风未开启。也可以在下方输入待办指令。");
                 voiceText.Focus();
             }));
             buttons.Controls.Add(MakeVoiceButton("收起对话", delegate { StopVoiceInput(false); voicePanel.Visible = false; }));
@@ -100,7 +102,7 @@ namespace LittleDeepSeek
             OpenList(false);
             voicePanel.Visible = true;
             voicePanel.BringToFront();
-            AppendVoice("小deepseek", "是否开启语音输入？开启后，我会根据你的话添加待办，或为已完成的事情打勾。点击“开启语音输入”才会使用麦克风。");
+            AppendVoice(PetName, "是否开启语音输入？开启后，我会根据你的话添加待办，或为已完成的事情打勾。点击“开启语音输入”才会使用麦克风。");
             voiceStart.Focus();
         }
 
@@ -123,7 +125,7 @@ namespace LittleDeepSeek
         private void StartVoiceInput()
         {
             if (voiceDisposed || voiceBusy) return;
-            if (!loaded) { AppendVoice("小deepseek", "待办清单正在加载，请稍后再开启语音。"); StartBackground(); return; }
+            if (!loaded) { AppendVoice(PetName, "待办清单正在加载，请稍后再开启语音。"); StartBackground(); return; }
             StopVoiceInput(false);
             VoiceInputSession session = new VoiceInputSession();
             voiceSession = session;
@@ -141,7 +143,7 @@ namespace LittleDeepSeek
                     voiceStatus.ForeColor = session.IsListening ? Color.FromArgb(169, 49, 38) : Color.FromArgb(68, 81, 107);
                     voiceStart.Enabled = !session.IsListening;
                     voiceStop.Enabled = session.IsListening;
-                    AppendVoice("小deepseek", message);
+                    AppendVoice(PetName, message);
                 });
             };
             session.Start();
@@ -157,7 +159,7 @@ namespace LittleDeepSeek
             if (voiceStatus != null) { voiceStatus.Text = "麦克风未开启"; voiceStatus.ForeColor = Color.FromArgb(68, 81, 107); }
             if (voiceStart != null) voiceStart.Enabled = true;
             if (voiceStop != null) voiceStop.Enabled = false;
-            if (announce) AppendVoice("小deepseek", "语音输入已停止，麦克风已释放。");
+            if (announce) AppendVoice(PetName, "语音输入已停止，麦克风已释放。");
         }
 
         private void SubmitVoiceText()
@@ -174,22 +176,22 @@ namespace LittleDeepSeek
             if (System.Text.RegularExpressions.Regex.IsMatch(text.Trim(),
                 @"^(?:请|帮我)?(?:停止语音|关闭语音|停止录音|关闭麦克风)(?:输入)?[。！!，,\s]*$"))
             { StopVoiceInput(true); return; }
-            if (voiceBusy) { AppendVoice("小deepseek", "上一句还在处理中，请稍后再说一次。"); return; }
+            if (voiceBusy) { AppendVoice(PetName, "上一句还在处理中，请稍后再说一次。"); return; }
             voiceBusy = true; voiceExecute.Enabled = false;
             try
             {
                 if (!loaded || browser.CoreWebView2 == null)
-                { AppendVoice("小deepseek", "清单还没有准备好，请稍后重试这句话。"); return; }
+                { AppendVoice(PetName, "清单还没有准备好，请稍后重试这句话。"); return; }
                 string raw = await browser.CoreWebView2.ExecuteScriptAsync(
                     "window.littleDeepSeekVoice ? window.littleDeepSeekVoice.snapshot() : null");
                 if (!CanApplyVoice(epoch, fromMicrophone)) return;
                 VoiceSnapshot snapshot = voiceJson.Deserialize<VoiceSnapshot>(raw);
                 if (snapshot == null || snapshot.tasks == null)
-                { AppendVoice("小deepseek", "待办页面尚未准备好，请稍后重试。"); return; }
+                { AppendVoice(PetName, "待办页面尚未准备好，请稍后重试。"); return; }
                 if (!string.IsNullOrEmpty(snapshot.storageError))
-                { AppendVoice("小deepseek", snapshot.storageError + " 请先恢复清单存储再使用语音。"); return; }
+                { AppendVoice(PetName, snapshot.storageError + " 请先恢复清单存储再使用语音。"); return; }
                 VoiceTodoPlan plan = VoiceTodoInterpreter.Interpret(text, snapshot.tasks);
-                if (plan.operations.Count == 0) { AppendVoice("小deepseek", plan.message); return; }
+                if (plan.operations.Count == 0) { AppendVoice(PetName, plan.message); return; }
                 string operations = voiceJson.Serialize(plan.operations);
                 string expected = voiceJson.Serialize(snapshot.tasks);
                 if (!CanApplyVoice(epoch, fromMicrophone)) return;
@@ -197,13 +199,13 @@ namespace LittleDeepSeek
                     "window.littleDeepSeekVoice ? window.littleDeepSeekVoice.apply(" + operations + "," + expected + ") : {ok:false,error:'待办页面已重新加载，请再说一次。'}");
                 if (voiceDisposed || shuttingDown || IsDisposed) return;
                 VoiceApplyResult result = voiceJson.Deserialize<VoiceApplyResult>(resultJson);
-                AppendVoice("小deepseek", result != null && result.ok ? plan.message :
+                AppendVoice(PetName, result != null && result.ok ? plan.message :
                     (result == null ? "待办更新失败，请重试。" : result.error));
             }
             catch (Exception error)
             {
                 if (!voiceDisposed && !shuttingDown && !IsDisposed)
-                    AppendVoice("小deepseek", "暂时无法更新待办，请重新打开清单后重试。（" + error.Message + "）");
+                    AppendVoice(PetName, "暂时无法更新待办，请重新打开清单后重试。（" + error.Message + "）");
             }
             finally
             {

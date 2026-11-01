@@ -1,0 +1,10 @@
+import { readFile, mkdir, writeFile, cp } from 'node:fs/promises';
+const source = await readFile('worker/index.js', 'utf8');
+const points = JSON.parse(await readFile('worker/points.json', 'utf8'));
+const page = await readFile('worker/page.html', 'utf8');
+const output = source.replace('/* POINTS */ []', JSON.stringify(points)).replace("/* PAGE */ ''", () => JSON.stringify(page));
+await mkdir('dist/server', { recursive: true });
+await mkdir('dist/.openai', { recursive: true });
+await writeFile('dist/server/index.js', output);
+await cp('.openai/hosting.json', 'dist/.openai/hosting.json');
+console.log('Built campus map Worker with 30 public campus points.');

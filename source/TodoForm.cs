@@ -12,6 +12,8 @@ namespace LittleDeepSeek
 {
     internal sealed partial class TodoForm : Form
     {
+        private readonly PetIdentity identity;
+        private string PetName { get { return identity.Name; } }
         private const string TodoHost = "todo.littledeepseek.example";
         private const string MessageType = "littledeepseek-todos-v1";
         private readonly string dataFolder;
@@ -34,11 +36,11 @@ namespace LittleDeepSeek
         partial void InitializeVoicePanel();
         partial void DisposeVoicePanel();
 
-        internal TodoForm(string dataFolder, Icon icon)
+        internal TodoForm(string dataFolder, Icon icon, PetIdentity identity = null)
         {
             this.dataFolder = dataFolder;
-            Text = "todo-list · 小deepseek";
-            AccessibleName = "小deepseek待办清单";
+            this.identity = identity ?? new PetIdentity();
+            this.identity.Bind(this, "todo-list · {pet}", "{pet}待办清单");
             Icon = icon;
             AutoScaleMode = AutoScaleMode.Dpi;
             StartPosition = FormStartPosition.CenterScreen;
